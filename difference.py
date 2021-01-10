@@ -1,16 +1,19 @@
 import numpy as np
 import os
 # on Windows, we need the original PATH without Anaconda's compiler in it:
-PATH = "C:/Program Files (x86)/Microsoft Visual Studio 14.0/VC/bin"
-# PATH = os.environ.get('PATH')
+PATH = os.environ.get('PATH')
 from distutils.spawn import spawn, find_executable
 from setuptools import setup, find_packages, Extension
 from setuptools.command.build_ext import build_ext
 import sys
+from os.path import join as pjoin
 
+#change for windows, by MrX
+nvcc_bin = 'nvcc.exe'
+lib_dir = 'lib/x64'
 # CUDA specific config
 # nvcc is assumed to be in user's PATH
-nvcc_compile_args = ['-O', '--ptxas-options=-v', '-arch=sm_35', '-c', '--compiler-options=-fPIC']
+nvcc_compile_args = ['-O', '--ptxas-options=-v', '-arch=sm_50', '-c', '--compiler-options=-fPIC']
 nvcc_compile_args = os.environ.get('NVCCFLAGS', '').split() + nvcc_compile_args
 cuda_libs = ['cublas']
 
@@ -22,12 +25,95 @@ except AttributeError:
     numpy_include = np.get_numpy_include()
 
 
-cudamat_ext = Extension('rotate_polygon_nms',
-                        sources=['rotate_polygon_nms_kernel.cu', 'rotate_polygon_nms.pyx'],
+def locate_cuda():
+    """Locate the CUDA environment on the system
+
+    Returns a dict with keys 'home', 'nvcc', 'include', and 'lib64'
+    and values giving the absolute path to each directory.
+
+    Starts by looking for the CUDAHOME env variable. If not found, everything
+    is based on finding 'nvcc' in the PATH.
+    """
+
+    #first check if the CUDAHOME env variable is in use
+    # if 'CUDA_PATH' in os.environ:
+        # home = os.environ['CUDA_PATH']
+        # nvcc = pjoin(home, 'bin', 'nvcc')
+    # else:
+        #otherwise, search the PATH for NVCC
+        # default_path = pjoin(os.sep, 'usr', 'local', 'cuda', 'bin')
+        # nvcc = find_in_path('nvcc', os.environ['PATH'] + os.pathsep + default_path)
+        # if nvcc is None:
+            # raise EnvironmentError('The nvcc binary could not be '
+                # 'located in your $PATH. Either add it to your path, or set $CUDAHOME')
+        # home = os.path.dirname(os.path.dirname(nvcc))
+
+    # cudaconfig = {'home':home, 'nvcc':nvcc,
+                  # 'include': pjoin(home, 'include'),
+                  # 'lib64': pjoin(home, 'lib64')}
+    # for k, v in cudaconfig.items():
+        # if not os.path.exists(v):
+            # raise EnvironmentError('The CUDA %s path could not be located in %s' % (k, v))
+
+    # return cudaconfig
+	
+	# first check if the CUDAHOME env variable is in use
+    if 'CUDA_PATH' in os.environ:
+        home = os.environ['CUDA_PATH']
+        print("home = %s\n" % home)
+        nvcc = pjoin(home, 'bin', nvcc_bin)
+    else:
+        # otherwise, search the PATH for NVCC
+        default_path = pjoin(os.sep, 'usr', 'local', 'cuda', 'bin')
+        nvcc = find_in_path(nvcc_bin, os.environ['PATH'] + os.pathsep + default_path)
+        if nvcc is None:
+            raise EnvironmentError('The nvcc binary could not be '
+                'located in your $PATH. Either add it to your path, or set $CUDA_PATH')
+        home = os.path.dirname(os.path.dirname(nvcc))
+        print("home = %s, nvcc = %s\n" % (home, nvcc))
+
+
+    cudaconfig = {'home':home, 'nvcc':nvcc,
+                  'include': pjoin(home, 'include'),
+                  'lib64': pjoin(home, lib_dir)}
+    for k, v in cudaconfig.items():
+        if not os.path.exists(v):
+            raise EnvironmentError('The CUDA %s path could not be located in %s' % (k, v))
+
+    return cudaconfig
+CUDA = locate_cuda()
+	
+	
+	
+cudamat_ext = Extension('nms.gpu_nms',
+                        sources=[
+                                'nms\\gpu_nms.cu'
+                                ],
                         language='c++',
                         libraries=cuda_libs,
                         extra_compile_args=nvcc_compile_args,
-                        include_dirs = [numpy_include, 'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.0/include'])
+                        include_dirs = [numpy_include, r'F:\\Program Files\\Cuda8.0\\include'])					
+
+
+# cudamat_ext = Extension('nms.gpu_nms',
+                        # ['nms/nms_kernel.cu', 'nms/gpu_nms.pyx'],
+                        # library_dirs=[CUDA['lib64']],
+						# libraries=['cudart'],
+						# language='c++',
+						# runtime_library_dirs=[CUDA['lib64']],
+						# this syntax is specific to this build system
+						# we're only going to use certain compiler args with nvcc and not with gcc
+						# the implementation of this trick is in customize_compiler() below
+						# extra_compile_args={'gcc': [],
+											# 'nvcc': ['-arch=sm_50',
+													# '--ptxas-options=-v',
+													# '-c',
+													# '--compiler-options',
+													# "'-fPIC'"]},
+						# include_dirs = [numpy_include, r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v8.0\\include']
+						# )						
+						
+       
 
 
 class CUDA_build_ext(build_ext):
@@ -113,7 +199,7 @@ class CUDA_build_ext(build_ext):
             # This could be done by a NVCCCompiler class for all platforms.
         spawn(cmd, search_path, verbose, dry_run)
 
-setup(name="tf_fast_rcnn_gpu",
+setup(name="py_fast_rcnn_gpu",
       description="Performs linear algebra computation on the GPU via CUDA",
       ext_modules=[cudamat_ext],
       cmdclass={'build_ext': CUDA_build_ext},
